@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HPC Fouling Interactive Simulator</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;background:#f5f7fa;color:#18212b}
+.wrap{max-width:1050px;margin:auto;padding:24px}
+h1{margin-bottom:6px}.sub{color:#52606d;margin-top:0}
+.grid{display:grid;grid-template-columns:330px 1fr;gap:18px}
+.card{background:white;border:1px solid #d9e0e7;border-radius:14px;padding:18px;box-shadow:0 2px 8px #0000000b}
+label{font-weight:bold;display:block;margin-top:16px}
+input[type=range]{width:100%}.value{float:right;font-weight:normal}
+.results{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.result{padding:13px;background:#f0f3f6;border-radius:10px}.result b{display:block;font-size:20px;margin-top:4px}
+canvas{width:100%;height:280px;border:1px solid #e1e6eb;border-radius:10px}
+.flow{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:12px 0}
+.box{padding:10px;border:1px solid #aeb8c2;border-radius:8px;background:#fafbfc}
+.hpc{border:2px solid #b34a4a;background:#fff4f4;font-weight:bold}
+.arrow{font-size:20px}.note{font-size:13px;color:#5d6873;line-height:1.45}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.results{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>HPC Blade Fouling — Interactive Thermodynamic Analysis</h1>
+<p class="sub">Change the sliders and observe how compressor efficiency, temperature, work and simplified thrust respond.</p>
+
+<div class="card">
+<div class="flow">
+<div class="box">Inlet</div><span class="arrow">→</span>
+<div class="box">LPC</div><span class="arrow">→</span>
+<div class="box hpc">HPC<br><small>FOULING</small></div><span class="arrow">→</span>
+<div class="box">Combustor</div><span class="arrow">→</span>
+<div class="box">Turbine</div><span class="arrow">→</span>
+<div class="box">Nozzle</div>
+</div>
+</div>
+
+<div class="grid">
+<div class="card">
+<h2>Inputs</h2>
+<label>HPC isentropic efficiency <span class="value" id="etaV"></span></label>
+<input id="eta" type="range" min="0.70" max="0.90" step="0.01" value="0.88">
+
+<label>HPC inlet temperature T₁ (K) <span class="value" id="t1V"></span></label>
+<input id="t1" type="range" min="280" max="320" step="1" value="288">
+
+<label>HPC pressure ratio P₂/P₁ <span class="value" id="prV"></span></label>
+<input id="pr" type="range" min="10" max="20" step="0.5" value="15">
+
+<label>Air mass flow (kg/s) <span class="value" id="mdotV"></span></label>
+<input id="mdot" type="range" min="30" max="70" step="1" value="50">
+
+<p class="note"><b>Fixed assumptions:</b> γ = 1.4 and cₚ = 1.005 kJ/kg·K. The thrust estimate is deliberately simplified for an educational case study.</p>
+</div>
+
+<div class="card">
+<h2>Live results</h2>
+<div class="results">
+<div class="result">Isentropic exit temperature T₂s<b id="t2s"></b></div>
+<div class="result">Actual exit temperature T₂<b id="t2"></b></div>
+<div class="result">Compressor work<b id="work"></b></div>
+<div class="result">Efficiency drop from 0.88<b id="drop"></b></div>
+<div class="result">Extra work vs. clean case<b id="extra"></b></div>
+<div class="result">Simplified thrust deficit<b id="thrustDef"></b></div>
+</div>
+</div>
+</div>
+
+<div class="card" style="margin-top:18px">
+<h2>Effect of HPC efficiency on compressor work</h2>
+<canvas id="chart"></canvas>
+<p class="note">The graph is recalculated using the current inlet temperature, pressure ratio and mass flow. Lower efficiency represents more severe fouling in this simplified model.</p>
+</div>
+
+<div class="card" style="margin-top:18px">
+<h2>Engineering interpretation</h2>
+<p id="interpret"></p>
+</div>
+</div>
+
+<script>
+const gamma=1.4, cp=1.005;
+const $=id=>document.getElementById(id);
+function calc(eta,t1,pr,mdot){
+ const t2s=t1*Math.pow(pr,(gamma-1)/gamma);
+ const t2=t1+(t2s-t1)/eta;
+ const work=mdot*cp*(t2-t1); // kW
+ const cleanEta=.88;
+ const cleanT2=t1+(t2s-t1)/cleanEta;
+ const cleanWork=mdot*cp*(cleanT2-t1);
+ const extra=work-cleanWork;
+ // simplified educational thrust model
+ const cpG=1.15, TtClean=1000, V0=250;
+ const dt=extra/(mdot*cpG);
+ const veClean=Math.sqrt(2*1150*(TtClean-t1));
+ const veFoul=Math.sqrt(2*1150*(Math.max(300,TtClean-dt)-t1));
+ const fClean=mdot*(veClean-V0);
+ const fFoul=mdot*(veFoul-V0);
+ const deficit=fClean>0?(fClean-fFoul)/fClean*100:0;
+ return {t2s,t2,work,cleanWork,extra,deficit};
+}
+function update(){
+ const eta=+$("eta").value,t1=+$("t1").value,pr=+$("pr").value,mdot=+$("mdot").value;
+ $("etaV").textContent=eta.toFixed(2); $("t1V").textContent=t1+" K";
+ $("prV").textContent=pr.toFixed(1); $("mdotV").textContent=mdot+" kg/s";
+ const r=calc(eta,t1,pr,mdot);
+ $("t2s").textContent=r.t2s.toFixed(2)+" K";
+ $("t2").textContent=r.t2.toFixed(2)+" K";
+ $("work").textContent=(r.work/1000).toFixed(2)+" MW";
+ $("drop").textContent=((.88-eta)/.88*100).toFixed(2)+" %";
+ $("extra").textContent=(r.extra/1000).toFixed(2)+" MW";
+ $("thrustDef").textContent=r.deficit.toFixed(2)+" %";
+ $("interpret").textContent =
+ "As HPC efficiency decreases, the actual exit temperature rises because more temperature rise is required to achieve the same pressure ratio. The First-Law relation Ẇc = ṁcp(T₂−T₁) therefore gives higher compressor work. In this simplified model, that additional work reduces the energy available for exhaust acceleration, producing a larger estimated thrust deficit.";
+ draw(eta,t1,pr,mdot);
+}
+function draw(current,t1,pr,mdot){
+ const c=$("chart"),dpr=c.getBoundingClientRect(),ratio=devicePixelRatio||1;
+ c.width=dpr.width*ratio;c.height=280*ratio;
+ const x=c.getContext("2d");x.scale(ratio,ratio);
+ const w=dpr.width,h=280;
+ x.clearRect(0,0,w,h);
+ const vals=[];for(let e=.70;e<=.9001;e+=.01) vals.push({e,w:calc(e,t1,pr,mdot).work/1000});
+ const max=Math.max(...vals.map(v=>v.w)),min=Math.min(...vals.map(v=>v.w));
+ const L=55,R=20,T=20,B=40;
+ x.strokeStyle="#7d8790";x.beginPath();x.moveTo(L,T);x.lineTo(L,h-B);x.lineTo(w-R,h-B);x.stroke();
+ x.font="12px Arial";x.fillStyle="#45515c";
+ x.fillText("Work (MW)",8,15);x.fillText("Efficiency",w/2-25,h-10);
+ for(let i=0;i<5;i++){let y=T+i*(h-B-T)/4;let v=max-i*(max-min)/4;x.fillText(v.toFixed(1),8,y+4);x.strokeStyle="#e5e9ed";x.beginPath();x.moveTo(L,y);x.lineTo(w-R,y);x.stroke();}
+ x.beginPath();vals.forEach((v,i)=>{let px=L+i*(w-R-L)/(vals.length-1);let py=T+(max-v.w)/(max-min)*(h-B-T);i?x.lineTo(px,py):x.moveTo(px,py)});x.strokeStyle="#334e68";x.lineWidth=2;x.stroke();
+ let idx=Math.round((current-.70)/.01);let v=vals[Math.max(0,Math.min(vals.length-1,idx))];
+ let px=L+idx*(w-R-L)/(vals.length-1),py=T+(max-v.w)/(max-min)*(h-B-T);
+ x.fillStyle="#9b3d3d";x.beginPath();x.arc(px,py,5,0,Math.PI*2);x.fill();
+}
+["eta","t1","pr","mdot"].forEach(id=>$(id).addEventListener("input",update));
+window.addEventListener("resize",update);update();
+</script>
+</body>
+</html>
